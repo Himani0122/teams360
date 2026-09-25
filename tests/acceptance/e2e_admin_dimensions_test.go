@@ -180,6 +180,15 @@ var _ = Describe("E2E: Admin Dimension Management", func() {
 	})
 
 	Context("when admin creates a new dimension", func() {
+		AfterEach(func() {
+			// Clean up: this test creates a real, active dimension via the UI with
+			// no synthetic-only marker. Left behind, it becomes a 12th active
+			// dimension that every other concurrently-running or later survey test
+			// sees, breaking any test that assumes exactly 11 dimensions (e.g.
+			// never reaching the "Submit Responses" button on the last page).
+			db.Exec("DELETE FROM health_dimensions WHERE name = 'E2E Test Dimension'")
+		})
+
 		It("should allow adding a new health dimension", func() {
 			loginAsAdmin()
 			navigateToSettings()
