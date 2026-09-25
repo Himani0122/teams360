@@ -87,6 +87,17 @@ var _ = Describe("E2E: Admin Dimension Management", func() {
 	})
 
 	Context("when admin edits a dimension", func() {
+		AfterEach(func() {
+			// Restore the real "mission" dimension's description so other tests
+			// (and the survey page, which now reads live dimension text from the
+			// database) don't see this test's temporary edit after it completes.
+			db.Exec(`
+				UPDATE health_dimensions
+				SET description = 'We know exactly why we are here, and we are really excited about it'
+				WHERE id = 'mission'
+			`)
+		})
+
 		It("should allow editing dimension name and descriptions", func() {
 			loginAsAdmin()
 			navigateToSettings()
