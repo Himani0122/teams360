@@ -1,0 +1,50 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    # NOTE: only *.up.sql files are listed, in migration order. The migrations
+    # directory also contains *.down.sql files (DROP TABLE / column-removal
+    # statements) which must NOT be fed to sqlc together with the up files -
+    # doing so would corrupt schema inference (e.g. a down migration dropping
+    # a column before the corresponding up migration ever adds it). This scope
+    # is limited to the Team and Healthcheck repositories, but the schema list
+    # includes every up migration since later migrations alter tables (teams,
+    # health_check_sessions) created in earlier ones.
+    schema:
+      - "infrastructure/persistence/postgres/migrations/000001_create_health_dimensions.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000002_create_health_check_sessions.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000003_create_health_check_responses.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000004_seed_health_dimensions.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000005_create_users_and_teams.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000006_add_password_hash.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000007_seed_demo_users.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000008_add_team_cadence.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000009_create_hierarchy_levels.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000010_add_hierarchy_level_color.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000011_add_hierarchy_permissions.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000012_create_password_reset_tokens.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000013_add_security_constraints.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000014_add_survey_type.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000015_create_app_settings.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000016_update_cadence_values.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000017_add_auth_type.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000018_add_branding_settings.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000019_add_team_distribution_list_email.up.sql"
+      - "infrastructure/persistence/postgres/migrations/000020_create_action_items.up.sql"
+    queries: "infrastructure/persistence/postgres/queries"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "infrastructure/persistence/postgres/sqlcgen"
+        sql_package: "database/sql"
+        emit_json_tags: false
+        emit_interface: true
+        # Targeted overrides to preserve exact pre-existing nullable-value
+        # handling (matching the sql.Null* / plain types the hand-written
+        # repositories used for these two columns).
+        overrides:
+          - column: "health_check_sessions.date"
+            go_type: "string"
+          - column: "health_check_sessions.completed"
+            go_type: "bool"
+          - column: "team_overall.overall_health"
+            go_type: "database/sql.NullFloat64"
