@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Plus, Edit2, Trash2, Save, AlertCircle, Eye, Users, FileText, type LucideIcon } from 'lucide-react';
 import {
   listHierarchyLevels,
@@ -53,6 +53,52 @@ const permissionIcons: Record<keyof LocalPermissions, LucideIcon> = {
 
 const PERMISSION_KEYS = Object.keys(permissionLabels) as (keyof LocalPermissions)[];
 
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Traps Tab/Shift+Tab focus within the dialog and closes it on Escape, so
+ * keyboard users can't tab behind the overlay and always have a way out.
+ */
+function useModalFocusTrap(active: boolean, containerRef: React.RefObject<HTMLDivElement | null>, onClose: () => void) {
+  useEffect(() => {
+    if (!active) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+
+      const container = containerRef.current;
+      if (!container) return;
+      const focusable = Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const activeElement = document.activeElement;
+
+      if (e.shiftKey) {
+        if (activeElement === first || !container.contains(activeElement)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (activeElement === last || !container.contains(activeElement)) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [active, containerRef, onClose]);
+}
+
 export default function HierarchyConfig() {
   const [levels, setLevels] = useState<HierarchyLevel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,9 +111,15 @@ export default function HierarchyConfig() {
     permissions: { ...EMPTY_PERMISSIONS },
   });
 
+  const addFormRef = useRef<HTMLDivElement>(null);
+  const editFormRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     loadHierarchyLevels();
   }, []);
+
+  useModalFocusTrap(showAddForm, addFormRef, () => cancelAdd());
+  useModalFocusTrap(!!(editingLevel && editFormData), editFormRef, () => cancelEdit());
 
   const loadHierarchyLevels = async () => {
     try {
@@ -327,7 +379,7 @@ export default function HierarchyConfig() {
           aria-modal="true"
           aria-labelledby="add-level-modal-title"
         >
-          <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <div ref={addFormRef} className="bg-white rounded-lg p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
             <h3 id="add-level-modal-title" className="text-lg font-semibold text-gray-900 mb-4">
               Add New Hierarchy Level
             </h3>
@@ -410,7 +462,7 @@ export default function HierarchyConfig() {
           aria-modal="true"
           aria-labelledby="edit-level-modal-title"
         >
-          <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <div ref={editFormRef} className="bg-white rounded-lg p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
             <h3 id="edit-level-modal-title" className="text-lg font-semibold text-gray-900 mb-4">
               Edit Hierarchy Level
             </h3>

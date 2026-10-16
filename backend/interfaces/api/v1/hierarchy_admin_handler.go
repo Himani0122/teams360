@@ -76,36 +76,47 @@ func (h *HierarchyAdminHandler) CreateHierarchyLevel(c *gin.Context) {
 	newPosition := maxPosition + 1
 
 	// Use the caller-supplied ID verbatim if given; otherwise derive a safe,
-	// unique, non-empty ID from the name.
-	levelID := strings.TrimSpace(req.ID)
-	if levelID == "" {
-		generatedID, err := h.generateUniqueHierarchyLevelID(c.Request.Context(), req.Name)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
-				Error:   "Failed to generate hierarchy level ID",
-				Message: err.Error(),
-			})
+	// unique, non-empty ID from the name. Auto-generated IDs are re-derived
+	// and retried on a duplicate-ID insert conflict, since the existence
+	// check in generateUniqueHierarchyLevelID is not atomic with the insert
+	// below and concurrent creates can still race for the same candidate.
+	callerSuppliedID := strings.TrimSpace(req.ID)
+	levelID := callerSuppliedID
+
+	for attempt := 0; ; attempt++ {
+		if callerSuppliedID == "" {
+			generatedID, err := h.generateUniqueHierarchyLevelID(c.Request.Context(), req.Name)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+					Error:   "Failed to generate hierarchy level ID",
+					Message: err.Error(),
+				})
+				return
+			}
+			levelID = generatedID
+		}
+
+		// Create hierarchy level domain model
+		level := &organization.HierarchyLevel{
+			ID:       levelID,
+			Name:     req.Name,
+			Position: newPosition,
+			Permissions: organization.Permissions{
+				CanViewAllTeams:  req.Permissions.CanViewAllTeams,
+				CanEditTeams:     req.Permissions.CanEditTeams,
+				CanManageUsers:   req.Permissions.CanManageUsers,
+				CanTakeSurvey:    req.Permissions.CanTakeSurvey,
+				CanViewAnalytics: req.Permissions.CanViewAnalytics,
+			},
+		}
+
+		// Save using repository
+		err := h.orgRepo.SaveHierarchyLevel(c.Request.Context(), level)
+		if err == nil {
+			c.JSON(http.StatusCreated, toHierarchyLevelDTO(level))
 			return
 		}
-		levelID = generatedID
-	}
 
-	// Create hierarchy level domain model
-	level := &organization.HierarchyLevel{
-		ID:       levelID,
-		Name:     req.Name,
-		Position: newPosition,
-		Permissions: organization.Permissions{
-			CanViewAllTeams:  req.Permissions.CanViewAllTeams,
-			CanEditTeams:     req.Permissions.CanEditTeams,
-			CanManageUsers:   req.Permissions.CanManageUsers,
-			CanTakeSurvey:    req.Permissions.CanTakeSurvey,
-			CanViewAnalytics: req.Permissions.CanViewAnalytics,
-		},
-	}
-
-	// Save using repository
-	if err := h.orgRepo.SaveHierarchyLevel(c.Request.Context(), level); err != nil {
 		if errors.Is(err, organization.ErrDuplicateHierarchyLevelName) {
 			c.JSON(http.StatusConflict, dto.ErrorResponse{
 				Error:   "Cannot create hierarchy level",
@@ -114,6 +125,9 @@ func (h *HierarchyAdminHandler) CreateHierarchyLevel(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, organization.ErrDuplicateHierarchyLevelID) {
+			if callerSuppliedID == "" && attempt < maxHierarchyLevelIDAttempts {
+				continue // auto-generated ID lost the race; regenerate and retry
+			}
 			c.JSON(http.StatusConflict, dto.ErrorResponse{
 				Error:   "Cannot create hierarchy level",
 				Message: fmt.Sprintf("A hierarchy level with id %q already exists. Provide a different id.", levelID),
@@ -126,8 +140,6 @@ func (h *HierarchyAdminHandler) CreateHierarchyLevel(c *gin.Context) {
 		})
 		return
 	}
-
-	c.JSON(http.StatusCreated, toHierarchyLevelDTO(level))
 }
 
 // UpdateHierarchyLevel handles PUT /api/v1/admin/hierarchy-levels/:id
@@ -272,6 +284,11 @@ func (h *HierarchyAdminHandler) generateUniqueHierarchyLevelID(ctx context.Conte
 	base := slugifyHierarchyLevelName(name)
 	if base == "" {
 		base = "level"
+	}
+	// Keep the generated ID within hierarchy_levels.id VARCHAR(50),
+	// leaving room for the "-<n>" collision suffix.
+	if len(base) > 40 {
+		base = base[:40]
 	}
 
 	candidate := base

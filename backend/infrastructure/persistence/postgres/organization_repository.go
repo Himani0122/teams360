@@ -363,6 +363,24 @@ func (r *OrganizationRepository) DeleteHierarchyLevel(ctx context.Context, tx in
 // offset so the table's UNIQUE(position) constraint is never violated by an
 // intermediate state within the same transaction.
 func (r *OrganizationRepository) CompactHierarchyPositions(ctx context.Context, tx interface{}) error {
+	// Both passes must commit together: if tx is nil (no caller-owned
+	// transaction), own a transaction here so the first pass can never be
+	// persisted without the second.
+	ownedTx := false
+	if tx == nil {
+		startedTx, err := r.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("failed to start hierarchy position compaction transaction: %w", err)
+		}
+		tx = startedTx
+		ownedTx = true
+		defer func() {
+			if ownedTx {
+				_ = startedTx.Rollback()
+			}
+		}()
+	}
+
 	exec, err := r.execerFor(tx)
 	if err != nil {
 		return err
@@ -388,6 +406,13 @@ func (r *OrganizationRepository) CompactHierarchyPositions(ctx context.Context, 
 		WHERE position >= $1
 	`, offset); err != nil {
 		return fmt.Errorf("failed to finalize hierarchy position compaction: %w", err)
+	}
+
+	if ownedTx {
+		if err := tx.(*sql.Tx).Commit(); err != nil {
+			return fmt.Errorf("failed to commit hierarchy position compaction: %w", err)
+		}
+		ownedTx = false
 	}
 
 	return nil
